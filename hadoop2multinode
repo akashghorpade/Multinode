@@ -1,144 +1,155 @@
-# Install Java
-sudo apt-get update
-sudo apt install default-jdk -y
-java -version
+-----*** upload .pem key to DC **----
+$ scp -i abc.pem abc.pem ubuntu@<pub-ip>:/home/ubuntu/.ssh
+>> do this for all nodes
 
-#Create a Hadoop user for accessing HDFS and MapReduce
-sudo addgroup hadoop
-sudo adduser hduser --ingroup hadoop 
-sudo adduser hduser sudo
-sudo su hduser
+$ ssh -i abc.pem <private-ip of any node>
 
-#Install SSH
-sudo apt-get install openssh-server -y
+-----*** Adding hosts to NN SNN JT and DN's ***-----
+$ sudo nano /etc/hosts
+172.31.23.8  ip-172-31-23-8.eu-west-1.compute.internal  nn
+172.31.23.7  ip-172-31-23-7.eu-west-1.compute.internal  snn
+172.31.23.10  ip-172-31-23-10.eu-west-1.compute.internal jt 
+172.31.23.9  ip-172-31-23-9.eu-west-1.compute.internal 1dn
+172.31.23.10  ip-172-31-23-10.eu-west-1.compute.internal 2dn
+172.31.23.9  ip-172-31-23-9.eu-west-1.compute.internal 3dn
 
-#Configure SSH
-ssh-keygen
-cd .ssh
-cat id_rsa.pub >> authorized_keys
-ssh localhost
+>> do this on all nodes 
 
-#Disable IPV6
-sudo nano /etc/sysctl.conf
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-sudo sysctl -p
+-----*** Configure .profile ***-----
+$ nano .profile
+eval `ssh-agent` ssh-add /home/ubuntu/.ssh/abc.pem
 
-#Download Hadoop
-wget -c https://www-us.apache.org/dist/hadoop/common/hadoop-2.9.2/hadoop-2.9.2.tar.gz
+$ source .profile
 
-#Extract and Install Hadoop tar ball
-tar -xzvf hadoop-2.9.2.tar.gz
-sudo mv hadoop-2.9.2 /usr/local/hadoop
-sudo chown hduser:hadoop -R /usr/local/hadoop
+>>> scp .profile to each node
 
-# Set Enviornment Variable
-readlink -f $(which java)
-nano ~/.bashrc
+-----*** Install dsh ***-----
+$ sudo apt-get update
+$ sudo apt install dsh -y
 
+>>>> Edit machines.list for dsh
+$ sudo nano /etc/dsh/machines.list
+#localhost
+nn
+snn
+jt
+1dn
+2dn
+3dn
+
+$ dsh -a uptime
+
+$ dsh -a sudo apt-get update
+
+
+-----*** Install Java ***----
+$ dsh -a sudo apt install openjdk-8-jdk -y
+$ dsh -a java -version
+
+
+-----*** Download Hadoop ***-----
+$ dsh -a wget -c http://apache.mirror.gtcomm.net/hadoop/common/hadoop-1.2.1/hadoop-1.2.1.tar.gz
+
+$ dsh -a tar -xzvf hadoop-1.2.1.tar.gz
+
+$ dsh -a sudo mv hadoop-1.2.1 /usr/local/hadoop
+
+
+-----*** Edit .bashrc ***-----
+
+nano .bashrc
+export HADOOP_PREFIX=/usr/local/hadoop/
+export PATH=$PATH:$HADOOP_PREFIX/bin
 export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
-export HADOOP_HOME=/usr/local/hadoop
-export PATH=$PATH:$HADOOP_HOME/bin
-export PATH=$PATH:$HADOOP_HOME/sbin
-export PATH=$PATH:/usr/local/hadoop/bin/
-export HADOOP_MAPRED_HOME=$HADOOP_HOME
-export HADOOP_COMMON_HOME=$HADOOP_HOME
-export HADOOP_HDFS_HOME=$HADOOP_HOME
-export YARN_HOME=$HADOOP_HOME
-export HADOOP_CONF_DIR=/usr/local/hadoop/etc/hadoop
+export PATH=$PATH:$JAVA_HOME
 
-source ~/.bashrc
+>>> scp .bashrc to all nodes 
+$ scp .bashrc ubuntu@snn:~
 
-cd /usr/local/hadoop/etc/hadoop/
+$ dsh -a source .bashrc
 
-#Update hadoop-env.sh
-nano hadoop-env.sh
+-----*** Configuring xml's ***-----
+
+$ cd /usr/local/hadooop/conf
+
+$ nano hadoop-env.sh
 export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
-export HADOOP_LOG_DIR=/var/log/hadoop
-sudo mkdir /var/log/hadoop
-sudo chown hduser:hadoop -R /var/log/hadoop
+export HADOOP_OPTS=-Djava.net.preferIPV4Stack=true
 
-#Update core-site.xml
-nano core-site.xml
+$ nano core-site.xml
 <property>
-  <name>hadoop.tmp.dir</name>
-  <value>/app/hadoop/tmp</value>
-  <description>A base for other temporary directories.</description>
- </property>
- <property>
-  <name>fs.defaultFS</name>
-  <value>hdfs://localhost:54310</value>
+<name>fs.default.name</name>
+<value>hdfs://nn:9000</value>
+</property>
+<property>
+<name>hadoop.tmp.dir</name>
+<value>/usr/local/hadoop/tmp</value>
 </property>
 
-sudo mkdir -p /app/hadoop/tmp
-sudo chown hduser:hadoop /app/hadoop/tmp
-
-
-#Update mapred-site.xml
-cp mapred-site.xml.template mapred-site.xml
-nano mapred-site.xml
+$ nano hdfs-site.xml
 <property>
-  <name>mapreduce.jobtracker.address</name>
-  <value>localhost:54311</value>
-   </property>
-<property>
-   <name>mapreduce.framework.name</name>
-   <value>yarn</value>
- </property>
-
-
-#Update hdfs-site.xml
-sudo mkdir -p /usr/local/hadoop_store/hdfs/namenode
-sudo mkdir -p /usr/local/hadoop_store/hdfs/datanode
-sudo chown -R hduser:hadoop /usr/local/hadoop_store
-nano hdfs-site.xml
-<property> 
 <name>dfs.replication</name>
-  <value>1</value>
- </property>
- <property>
-   <name>dfs.namenode.name.dir</name>
-   <value>file:/usr/local/hadoop_store/hdfs/namenode</value>
- </property>
- <property>
-   <name>dfs.datanode.data.dir</name>
-   <value>file:/usr/local/hadoop_store/hdfs/datanode</value>
- </property>
+<value>3</value>
+</property>
+<property> 
+<name>dfs.permissions</name> 
+<value>false</value> 
+</property>
 
-
-#Update yarn-site.xml
-nano yarn-site.xml
+$ nano mapred-site.xml
 <property>
-      <name>yarn.nodemanager.aux-services</name>
-      <value>mapreduce_shuffle</value>
-   </property>
+<name>mapred.job.tracker</name>
+<value>hdfs://jt:9001</value>
+</property>
 
 
-#Format Namenode
-hdfs namenode -format
+-----*** Configure masters and slaves ***-----
+$ nano masters
+#localhost
+snn
 
-start-all.sh 
-or start-dfs.sh
-start-yarn.sh
+$ nano slaves
+#localhost
+1dn
+2dn
+3dn
+
+>>> on SNN
+$ ssh snn
+nano /usr/local/hadoop/conf/masters
+#localhost
+
+>>> on JT
+$ ssh jt
+nano /usr/local/hadoop/conf/masters
+#localhost
+jt
+
+-----*** scp configurations xml's and slaves to all nodes ***-----
+
+$ cd /usr/local/hadoop/conf/
+
+$ scp  hadoop-env.sh core-site.xml hdfs-site.xml mapred-site.xml slaves ubuntu@snn:/usr/local/hadoop/conf/
+Same for all nodes
+
+----*** Creating tmp directory (make sure you are on NN) ***-----
+$ dsh -a mkdir /usr/local/hadoop/tmp
+
+-----*** Exec bash ***-----
+$ dsh -a exec bash
 
 
-jps
+-----*** Formatting namenode(make sure you are on NN) ***-----
+$ hadoop namenode -format
 
 
 
-hdfs dfs -mkdir /user
-hdfs dfs -mkdir /user/ubuntu
-hdfs dfs -put --- /user/ubuntu
+-----*** starting dfs daemons(from NN) ***----- 
+$ start-dfs.sh
 
-hadoop jar /usr/local/hadoop/share/hadoop/mapreduce/hadoop-*examples*.jar pi 5 10
-
-
+-----*** Starting mapred daemons (make sure you are on JT) ***-----
+$ start-mapred.sh
 
 
-<----- Troubleshooting ----->
-# if you are getting >>>  ..WARN.util.NativeCodeLoader: Unable to load native-hadoop library
-Edit the bashrc file
-nano ~/.bashrc
-export HADOOP_HOME_WARN_SUPPRESS=1
-export HADOOP_ROOT_LOGGER="WARN,DRFA"
+-----*** Check java process ***-----
+$ dsh -a jps
